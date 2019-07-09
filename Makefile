@@ -49,13 +49,11 @@ clean-exe:  ## remove execs.
 	@rm -rf ${EXE_LIST}
 
 clean-integrations:  ## remove built integrations files.
-	@if [ -d data/integrations ]; then \
-		find ./data/integrations -type f -maxdepth 1 \
-	    -a -not -name '*.fr.yaml' \
+	@if [ -d data/en/integrations ]; then \
+		find ./data/en/integrations -type f -maxdepth 1 \
 	    -exec rm -rf {} \; ;fi
-	@if [ -d data/service_checks ]; then \
-		find ./data/service_checks -type f -maxdepth 1 \
-	    -a -not -name '*.fr.json' \
+	@if [ -d data/en/service_checks ]; then \
+		find ./data/en/service_checks -type f -maxdepth 1 \
 	    -exec rm -rf {} \; ;fi
 	@find ./content/en/integrations -type f -maxdepth 1 \
 	    -a -not -name '_index.md' \

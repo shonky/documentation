@@ -6,6 +6,8 @@ static/images/
 data/integrations/
 data/service_checks/
 data/manifests/
+data/en/integrations/
+data/en/service_checks/
 
 # Ignoring all integrations file
 content/integrations/*.md

@@ -202,7 +202,7 @@ class PreBuild:
         self.data_dir = "{0}{1}{2}".format(
             abspath(normpath(options.source)),
             sep,
-            "data" + sep,
+            "data" + sep + "en" + sep,
         )
         self.content_dir = "{0}{1}{2}".format(
             abspath(normpath(options.source)),
