@@ -1,5 +1,9 @@
 stages:
+  - lint
+  - dependencies
   - build
+  - test
+  - deploy
   - post-deploy
   - cleanup
 
@@ -10,15 +14,13 @@ variables:
   LIVE_DOMAIN: "https://docs.datadoghq.com/"
   PREVIEW_DOMAIN: "https://docs-staging.datadoghq.com/"
 
-# ================== copy scripts =============== #
-before_script:
-  - find local/bin/ -type f -exec cp {} /usr/local/bin \;  # load scripts
-  - find local/etc/ -type f -exec cp {} /etc \;  # load configs
-  - source /usr/local/bin/helpers.sh  # source helpers so they are available in the container
-
 # ================== templates ================== #
 .base_template: &base_template
-  image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/corp-ci:zach_upgrade-docs-webpack
+  image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/corp-ci:david.jones_ci-updates
+  before_script:
+    - find local/bin/ -type f -exec cp {} /usr/local/bin \;  # load scripts
+    - find local/etc/ -type f -exec cp {} /etc \;  # load configs
+    - source /usr/local/bin/helpers.sh  # source helpers so they are available in the container
   tags:
     - "runner:main"
     - "size:large"
@@ -27,60 +29,339 @@ before_script:
 
 # ================== preview ================== #
 # If the branch has a name of <slack-user>/<feature-name> then ci builds a preview site
-build_preview:
+
+# Lint stage
+# we want to fail as soon as possible if syntax is incorrect
+
+lint:yaml:
   <<: *base_template
-  stage: build
+  stage: lint
   environment: "preview"
-  variables:
-    URL: ${PREVIEW_DOMAIN}
-    CONFIG: ${PREVIEW_CONFIG}
-    MESSAGE: ":gift_heart: Your preview site is available!\nNow running tests..."
-    CONFIGURATION_FILE: "./local/etc/pull_config_preview.yaml"
   script:
-    - post_dd_event "documentation deploy ${CI_COMMIT_REF_NAME} started" "${CI_PROJECT_URL}/pipelines/${CI_PIPELINE_ID}" "info"
-    - version_static_assets
-    - sync_integration_descriptions
-    #- sync_integration_descriptions_cached
-    - placehold_translations
-    - update_preview_baseurl
-    - build_hugo_site_new
-    - collect_static_assets
-    # remove service_checks json as we don't need to s3 push that..
-    - rm -rf data/service_checks
-    - push_site_to_s3
-    - notify_slack "<https://github.com/DataDog/documentation/commit/${CI_COMMIT_SHA}|${CI_COMMIT_REF_NAME}> is ready for preview. <${CI_PROJECT_URL}/pipelines/${CI_PIPELINE_ID}| checks running>." "#31b834"
-    #- remove_static_from_repo
-    #- create_artifact
-    #- create_artifact_untracked
-  artifacts:
-    paths:
-      - ${ARTIFACT_RESOURCE}
+    - cp -r /etc/node_modules .
+    - yarn add yamllint
+    - node_modules/.bin/yamllint data/**/*.yaml || exit 1
   only:
     - /.+?\/[a-zA-Z0-9_-]+/
 
-test_preview_link_checks:
+lint:md:
   <<: *base_template
-  stage: post-deploy
+  stage: lint
+  environment: "preview"
+  script:
+    - cp -r /etc/node_modules .
+    - yarn add markdownlint-cli
+    - node_modules/.bin/markdownlint content/**/*.md
+  only:
+    - /.+?\/[a-zA-Z0-9_-]+/
+
+# Dependencies Stage
+# In order to build the site we need dependencies, these are built as seperate jobs and passed to the build stage
+
+deps:integrations:
+  <<: *base_template
+  stage: dependencies
+  environment: "preview"
+  variables:
+    CONFIGURATION_FILE: "./local/etc/pull_config_preview.yaml"
+  script:
+    - sync_integration_descriptions
+  artifacts:
+    untracked: true
+    when: on_success
+    paths:
+      - content/en/integrations/*.md
+      - content/en/agent/basic_agent_usage/heroku.md
+      - content/en/developers/integrations/*.md
+      - data/service_checks/*.json
+      - data/integrations/*.yaml
+    expire_in: 1 week
+  only:
+    - /.+?\/[a-zA-Z0-9_-]+/
+
+deps:placeholders:
+  <<: *base_template
+  stage: dependencies
+  environment: "preview"
+  script:
+    - placehold_translations
+  artifacts:
+    untracked: false
+    when: on_success
+    paths:
+      - content/fr/**/*.md
+      - content/ja/**/*.md
+    expire_in: 1 week
+  only:
+    - /.+?\/[a-zA-Z0-9_-]+/
+
+deps:assets:
+  <<: *base_template
+  stage: dependencies
+  environment: "preview"
+  script:
+    - version_static_assets
+  artifacts:
+    untracked: false
+    when: on_success
+    paths:
+      - static/js/**/*.js
+      - static/css/**/*.css
+      - data/manifests/*.json
+    expire_in: 1 week
+  only:
+    - /.+?\/[a-zA-Z0-9_-]+/
+
+deps:changes:
+  <<: *base_template
+  stage: dependencies
+  environment: "preview"
+  variables:
+    LANGUAGES: "fr,ja"
+  script:
+    - echo "Change detection..."
+    - python3 -m pip install sh
+    - python3 ./local/bin/py/change_detect.py
+  artifacts:
+    untracked: false
+    when: on_success
+    paths:
+      - continue_*
+    expire_in: 1 week
+  only:
+    - /.+?\/[a-zA-Z0-9_-]+/
+
+# Build Stage
+# We build the different languages in different jobs and only build if deps:changes says so
+
+build:hugo:en:
+  <<: *base_template
+  stage: build
+  environment: "preview"
+  script:
+    - cp -r /etc/node_modules .
+    - update_preview_baseurl
+    - HUGO_DISABLELANGUAGES="fr ja" ./node_modules/.bin/hugo --environment "${CI_ENVIRONMENT_NAME}" --verbose --minify
+  artifacts:
+    untracked: false
+    when: on_success
+    paths:
+      - public/
+    expire_in: 1 week
+  dependencies:
+    - deps:assets
+    - deps:integrations
+  only:
+    refs:
+      - /.+?\/[a-zA-Z0-9_-]+/
+
+build:hugo:fr:
+  <<: *base_template
+  stage: build
+  environment: "preview"
+  script:
+    # Only build the fr site if deps:changes created continue_fr
+    - "if [[ -f continue_fr ]]; then
+        cp -r /etc/node_modules .;
+        update_preview_baseurl;
+        HUGO_DISABLELANGUAGES='ja' ./node_modules/.bin/hugo --environment '${CI_ENVIRONMENT_NAME}' --verbose --minify;
+      else
+        echo 'No fr related changes, nothing to do';
+      fi"
+  artifacts:
+    untracked: false
+    when: on_success
+    paths:
+      - public/fr/
+    expire_in: 1 week
+  dependencies:
+    - deps:assets
+    - deps:integrations
+    - deps:placeholders
+    - deps:changes
+  only:
+    refs:
+      - /.+?\/[a-zA-Z0-9_-]+/
+
+build:hugo:ja:
+  <<: *base_template
+  stage: build
+  environment: "preview"
+  script:
+    # Only build the ja site if deps:changes created continue_ja
+    - "if [[ -f continue_ja ]]; then
+        cp -r /etc/node_modules .;
+        update_preview_baseurl;
+        HUGO_DISABLELANGUAGES='fr' ./node_modules/.bin/hugo --environment '${CI_ENVIRONMENT_NAME}' --verbose --minify;
+      else
+        echo 'No ja related changes, nothing to do';
+      fi"
+  artifacts:
+    untracked: false
+    when: on_success
+    paths:
+      - public/ja/
+    expire_in: 1 week
+  dependencies:
+    - deps:assets
+    - deps:integrations
+    - deps:placeholders
+    - deps:changes
+  only:
+    refs:
+      - /.+?\/[a-zA-Z0-9_-]+/
+
+# Test Stage
+# After the build is complete the test stage is for running any final checks on the build output before shipping it
+
+check:links:
+  <<: *base_template
+  stage: test
   environment: "preview"
   variables:
     URL: ${PREVIEW_DOMAIN}
     DISALLOW_BOTS: "1"
   script:
-    - node /etc/node_modules/link-checker/dd-link-checker.js -e preview -c ${CI_PROJECT_DIR}/local/etc/link-check-config.js
+    #- node /etc/node_modules/link-checker/dd-link-checker.js -e preview -c ${CI_PROJECT_DIR}/local/etc/link-check-config.js
+    - echo "test links coming soon"
+  dependencies:
+    - build:hugo:en
+    - build:hugo:ja
+    - build:hugo:fr
   only:
     - /.+?\/[a-zA-Z0-9_-]+/
 
-test_missing_tms_preview:
+check:images:
   <<: *base_template
-  stage: post-deploy
+  stage: test
   environment: "preview"
-  allow_failure: true
-  dependencies:
-    - build_preview
   script:
-    - check_missing_tms
+    - echo "test images coming soon"
+  dependencies:
+    - build:hugo:en
+    - build:hugo:ja
+    - build:hugo:fr
   only:
     - /.+?\/[a-zA-Z0-9_-]+/
+
+check:trademarks:
+  <<: *base_template
+  stage: test
+  environment: "preview"
+  allow_failure: true
+  script:
+    - check_missing_tms
+  dependencies:
+    - build:hugo:en
+    - build:hugo:ja
+    - build:hugo:fr
+  only:
+    - /.+?\/[a-zA-Z0-9_-]+/
+
+# Deploy Stage
+# Lets ship it!
+
+deploy:site:
+  <<: *base_template
+  stage: deploy
+  environment: "preview"
+  variables:
+    URL: ${PREVIEW_DOMAIN}
+    CONFIG: ${PREVIEW_CONFIG}
+  script:
+    - push_site_to_s3
+  dependencies:
+    - build:hugo:en
+    - build:hugo:ja
+    - build:hugo:fr
+  only:
+    - /.+?\/[a-zA-Z0-9_-]+/
+
+# Post Deploy Stage
+# Lets notify the success or failure of the build!
+
+notify:failure:
+  stage: post-deploy
+  image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/slack-notifier:latest
+  tags:
+    - "runner:main"
+    - "size:large"
+  variables:
+    MESSAGE: ':weary: ${CI_COMMIT_SHA}|${CI_COMMIT_REF_NAME} failed. <${CI_PROJECT_URL}/pipelines/${CI_PIPELINE_ID}|see pipeline>'
+  only:
+    - /.+?\/[a-zA-Z0-9_-]+/
+  script:
+    - /usr/local/bin/notify.sh
+  when: on_failure
+
+notify:success:
+  stage: post-deploy
+  image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/slack-notifier:latest
+  tags:
+    - "runner:main"
+    - "size:large"
+  variables:
+    MESSAGE: '<https://github.com/DataDog/documentation/commit/${CI_COMMIT_SHA}|${CI_COMMIT_REF_NAME}> is ready for preview. <${CI_PROJECT_URL}/pipelines/${CI_PIPELINE_ID}|checks running>.Site: <${PREVIEW_DOMAIN}${CI_COMMIT_REF_NAME}>'
+  only:
+    - /.+?\/[a-zA-Z0-9_-]+/
+  script:
+    - /usr/local/bin/notify.sh
+  when: on_success
+
+#build_preview:
+#  <<: *base_template
+#  stage: build
+#  environment: "preview"
+#  variables:
+#    URL: ${PREVIEW_DOMAIN}
+#    CONFIG: ${PREVIEW_CONFIG}
+#    MESSAGE: ":gift_heart: Your preview site is available!\nNow running tests..."
+#    CONFIGURATION_FILE: "./local/etc/pull_config_preview.yaml"
+#  script:
+#    - post_dd_event "documentation deploy ${CI_COMMIT_REF_NAME} started" "${CI_PROJECT_URL}/pipelines/${CI_PIPELINE_ID}" "info"
+#    - version_static_assets
+#    - sync_integration_descriptions
+#    #- sync_integration_descriptions_cached
+#    - placehold_translations
+#    - update_preview_baseurl
+#    - build_hugo_site_new
+#    - collect_static_assets
+#    # remove service_checks json as we don't need to s3 push that..
+#    - rm -rf data/service_checks
+#    - push_site_to_s3
+#    - notify_slack "<https://github.com/DataDog/documentation/commit/${CI_COMMIT_SHA}|${CI_COMMIT_REF_NAME}> is ready for preview. <${CI_PROJECT_URL}/pipelines/${CI_PIPELINE_ID}| checks running>." "#31b834"
+#    #- remove_static_from_repo
+#    #- create_artifact
+#    #- create_artifact_untracked
+#  artifacts:
+#    paths:
+#      - ${ARTIFACT_RESOURCE}
+#  only:
+#    - /.+?\/[a-zA-Z0-9_-]+/
+#
+#test_preview_link_checks:
+#  <<: *base_template
+#  stage: post-deploy
+#  environment: "preview"
+#  variables:
+#    URL: ${PREVIEW_DOMAIN}
+#    DISALLOW_BOTS: "1"
+#  script:
+#    - node /etc/node_modules/link-checker/dd-link-checker.js -e preview -c ${CI_PROJECT_DIR}/local/etc/link-check-config.js
+#  only:
+#    - /.+?\/[a-zA-Z0-9_-]+/
+#
+#test_missing_tms_preview:
+#  <<: *base_template
+#  stage: post-deploy
+#  environment: "preview"
+#  allow_failure: true
+#  dependencies:
+#    - build_preview
+#  script:
+#    - check_missing_tms
+#  only:
+#    - /.+?\/[a-zA-Z0-9_-]+/
 
 # ================== live ================== #
 build_live:
