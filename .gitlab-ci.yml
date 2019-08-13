@@ -1,6 +1,5 @@
 stages:
-  - lint
-  - dependencies
+  - prebuild
   - build
   - test
   - deploy
@@ -30,12 +29,13 @@ variables:
 # ================== preview ================== #
 # If the branch has a name of <slack-user>/<feature-name> then ci builds a preview site
 
-# Lint stage
+# Prebuild stage
 # we want to fail as soon as possible if syntax is incorrect
+# In order to build the site we need dependencies, these are built as seperate jobs and passed to the build stage
 
 lint:yaml:
   <<: *base_template
-  stage: lint
+  stage: prebuild
   environment: "preview"
   script:
     - cp -r /etc/node_modules .
@@ -46,7 +46,7 @@ lint:yaml:
 
 lint:md:
   <<: *base_template
-  stage: lint
+  stage: prebuild
   environment: "preview"
   script:
     - cp -r /etc/node_modules .
@@ -55,12 +55,9 @@ lint:md:
   only:
     - /.+?\/[a-zA-Z0-9_-]+/
 
-# Dependencies Stage
-# In order to build the site we need dependencies, these are built as seperate jobs and passed to the build stage
-
 deps:integrations:
   <<: *base_template
-  stage: dependencies
+  stage: prebuild
   environment: "preview"
   variables:
     CONFIGURATION_FILE: "./local/etc/pull_config_preview.yaml"
@@ -81,7 +78,7 @@ deps:integrations:
 
 deps:placeholders:
   <<: *base_template
-  stage: dependencies
+  stage: prebuild
   environment: "preview"
   script:
     - placehold_translations
@@ -97,7 +94,7 @@ deps:placeholders:
 
 deps:assets:
   <<: *base_template
-  stage: dependencies
+  stage: prebuild
   environment: "preview"
   script:
     - version_static_assets
@@ -114,7 +111,7 @@ deps:assets:
 
 deps:changes:
   <<: *base_template
-  stage: dependencies
+  stage: prebuild
   environment: "preview"
   variables:
     LANGUAGES: "fr,ja"
@@ -278,7 +275,7 @@ deploy:site:
     - /.+?\/[a-zA-Z0-9_-]+/
 
 # Post Deploy Stage
-# Lets notify the success or failure of the build!
+# Lets notify the success or failure of the build! and run any other post deploy tests or checks
 
 notify:failure:
   stage: post-deploy
