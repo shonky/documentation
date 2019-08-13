@@ -39,7 +39,7 @@ lint:yaml:
   environment: "preview"
   script:
     - cp -r /etc/node_modules .
-    - yarn add yamllint
+    - yarn add yaml-lint
     - node_modules/.bin/yamllint data/**/*.yaml || exit 1
   only:
     - /.+?\/[a-zA-Z0-9_-]+/
