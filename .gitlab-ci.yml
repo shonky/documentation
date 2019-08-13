@@ -1,4 +1,5 @@
 stages:
+  - prebuild
   - build
   - post-deploy
   - cleanup
@@ -27,36 +28,136 @@ before_script:
 
 # ================== preview ================== #
 # If the branch has a name of <slack-user>/<feature-name> then ci builds a preview site
-build_preview:
+prebuild:
   <<: *base_template
-  stage: build
+  stage: prebuild
   environment: "preview"
   variables:
     URL: ${PREVIEW_DOMAIN}
     CONFIG: ${PREVIEW_CONFIG}
     MESSAGE: ":gift_heart: Your preview site is available!\nNow running tests..."
     CONFIGURATION_FILE: "./local/etc/pull_config_preview.yaml"
+    LANGUAGES: "fr,ja"
   script:
     - post_dd_event "documentation deploy ${CI_COMMIT_REF_NAME} started" "${CI_PROJECT_URL}/pipelines/${CI_PIPELINE_ID}" "info"
     - version_static_assets
     - sync_integration_descriptions
     #- sync_integration_descriptions_cached
     - placehold_translations
-    - update_preview_baseurl
-    - build_hugo_site_new
+    #- update_preview_baseurl
+    #- build_hugo_site_new
     - collect_static_assets
     # remove service_checks json as we don't need to s3 push that..
-    - rm -rf data/service_checks
-    - push_site_to_s3
-    - notify_slack "<https://github.com/DataDog/documentation/commit/${CI_COMMIT_SHA}|${CI_COMMIT_REF_NAME}> is ready for preview. <${CI_PROJECT_URL}/pipelines/${CI_PIPELINE_ID}| checks running>." "#31b834"
+    #- rm -rf data/service_checks
+    #- push_site_to_s3
+    #- notify_slack "<https://github.com/DataDog/documentation/commit/${CI_COMMIT_SHA}|${CI_COMMIT_REF_NAME}> is ready for preview. <${CI_PROJECT_URL}/pipelines/${CI_PIPELINE_ID}| checks running>." "#31b834"
     #- remove_static_from_repo
     #- create_artifact
     #- create_artifact_untracked
+    - python3 -m pip install sh && python3 ./local/bin/py/change_detect.py
   artifacts:
+    untracked: false
+    when: on_success
     paths:
-      - ${ARTIFACT_RESOURCE}
+      # for sync_integration_descriptions
+      - content/en/integrations/*.md
+      - content/en/agent/basic_agent_usage/heroku.md
+      - content/en/developers/integrations/*.md
+      - data/service_checks/*.json
+      - data/integrations/*.yaml
+      # for placehold_translations
+      - content/fr/**/*.md
+      - content/ja/**/*.md
+      # for version_static_assets
+      - static/js/**/*.js
+      - static/css/**/*.css
+      - data/manifests/*.json
+      # for changes
+      - continue_*
+    expire_in: 1 week
   only:
     - /.+?\/[a-zA-Z0-9_-]+/
+
+
+# Build Stage
+# We build the different languages in different jobs and only build if deps:changes says so
+
+build:hugo:en:
+  <<: *base_template
+  stage: build
+  environment: "preview"
+  script:
+    - cp -r /etc/node_modules .
+    - update_preview_baseurl
+    - HUGO_DISABLELANGUAGES="fr ja" ./node_modules/.bin/hugo --environment "${CI_ENVIRONMENT_NAME}" --verbose --minify
+    - push_site_to_s3
+  artifacts:
+    untracked: false
+    when: on_success
+    paths:
+      - public/
+    expire_in: 1 week
+  dependencies:
+    - prebuild
+  only:
+    refs:
+      - /.+?\/[a-zA-Z0-9_-]+/
+
+build:hugo:fr:
+  <<: *base_template
+  stage: build
+  environment: "preview"
+  script:
+    # Only build the fr site if deps:changes created continue_fr
+    # delete the english files in hugo build as we only want to upload our language files
+    - "if [[ -f continue_fr ]]; then
+        cp -r /etc/node_modules .;
+        update_preview_baseurl;
+        HUGO_DISABLELANGUAGES='ja' ./node_modules/.bin/hugo --environment '${CI_ENVIRONMENT_NAME}' --verbose --minify;
+        find ./public -mindepth 1 ! -path './public/fr/*' -delete;
+        push_site_to_s3;
+      else
+        echo 'No fr related changes, nothing to do';
+      fi"
+  artifacts:
+    untracked: false
+    when: on_success
+    paths:
+      - public/fr/
+    expire_in: 1 week
+  dependencies:
+    - prebuild
+  only:
+    refs:
+      - /.+?\/[a-zA-Z0-9_-]+/
+
+build:hugo:ja:
+  <<: *base_template
+  stage: build
+  environment: "preview"
+  script:
+    # Only build the ja site if deps:changes created continue_ja
+    # delete the english files in hugo build as we only want to upload our language files
+    - "if [[ -f continue_ja ]]; then
+        cp -r /etc/node_modules .;
+        update_preview_baseurl;
+        HUGO_DISABLELANGUAGES='fr' ./node_modules/.bin/hugo --environment '${CI_ENVIRONMENT_NAME}' --verbose --minify;
+        find ./public -mindepth 1 ! -path './public/ja/*' -delete;
+        push_site_to_s3;
+      else
+        echo 'No ja related changes, nothing to do';
+      fi"
+  artifacts:
+    untracked: false
+    when: on_success
+    paths:
+      - public/ja/
+    expire_in: 1 week
+  dependencies:
+    - prebuild
+  only:
+    refs:
+      - /.+?\/[a-zA-Z0-9_-]+/
 
 test_preview_link_checks:
   <<: *base_template
@@ -76,7 +177,9 @@ test_missing_tms_preview:
   environment: "preview"
   allow_failure: true
   dependencies:
-    - build_preview
+    - build:hugo:en
+    - build:hugo:fr
+    - build:hugo:ja
   script:
     - check_missing_tms
   only:
