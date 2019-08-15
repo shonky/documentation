@@ -69,9 +69,9 @@ prebuild:
       - content/fr/**/*.md
       - content/ja/**/*.md
       # for version_static_assets
-      - static/js/**/*.js
-      - static/css/**/*.css
-      - data/manifests/*.json
+      - public/static/**/*.js
+      - public/static/**/*.css
+      - data/manifest.json
       # for changes
       - continue_*
     expire_in: 1 week
