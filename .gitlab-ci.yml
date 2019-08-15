@@ -44,7 +44,7 @@ prebuild:
     - sync_integration_descriptions
     #- sync_integration_descriptions_cached
     - placehold_translations
-    #- update_preview_baseurl
+    - update_preview_baseurl
     #- build_hugo_site_new
     - collect_static_assets
     # remove service_checks json as we don't need to s3 push that..
@@ -71,6 +71,8 @@ prebuild:
       # for version_static_assets
       - public/static/
       - data/manifest.json
+      # config for preview branch changes
+      - config/
       # for changes
       - continue_*
     expire_in: 1 week
@@ -111,7 +113,6 @@ build:hugo:fr:
     # delete the english files in hugo build as we only want to upload our language files
     - "if [[ -f continue_fr ]]; then
         cp -r /etc/node_modules .;
-        update_preview_baseurl;
         HUGO_DISABLELANGUAGES='ja' ./node_modules/.bin/hugo --environment '${CI_ENVIRONMENT_NAME}' --verbose --minify;
         find ./public -mindepth 1 ! -path './public/fr/*' -delete;
         push_site_to_s3;
@@ -139,7 +140,6 @@ build:hugo:ja:
     # delete the english files in hugo build as we only want to upload our language files
     - "if [[ -f continue_ja ]]; then
         cp -r /etc/node_modules .;
-        update_preview_baseurl;
         HUGO_DISABLELANGUAGES='fr' ./node_modules/.bin/hugo --environment '${CI_ENVIRONMENT_NAME}' --verbose --minify;
         find ./public -mindepth 1 ! -path './public/ja/*' -delete;
         push_site_to_s3;
