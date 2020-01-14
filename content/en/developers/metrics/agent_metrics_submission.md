@@ -83,7 +83,7 @@ self.gauge(name=, value, tags=None, hostname=None, device_name=None)
 
 ### `rate()`
 
-This function submits the sampled raw value of your RATE metric. The Datadog Agent calculates the delta of that metric's value between two submission, and divides it by the submission interval to get the rate. This function should only be called once during a check, otherwise it throws away any value that is less than a previously submitted value.
+This function submits the sampled raw value of your RATE metric that always increases. The Datadog Agent calculates the delta of that metric's value between two submission, and divides it by the submission interval to get the rate. This function should only be called once during a check, otherwise it throws away any value that is less than a previously submitted value.
 
 **Note**: Metrics submitted with this function are stored as a `GAUGE` metric type in Datadog. Each value in the stored timeseries is a time-normalized delta of the metric's value between samples.
 
