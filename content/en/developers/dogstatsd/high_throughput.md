@@ -314,7 +314,53 @@ Telemetry will soon be added to the Java client.
 {{% /tab %}}
 {{% tab "PHP" %}}
 
-Telemetry will soon be added to the PHP client.
+Starting with version `1.5.0` of the PHP client the telemetry is enabled by
+default for the `BatchedDogStatsd` client and disabled by default for the
+`DogStatsd` client.
+
+
+| Metrics Name                               | Metric Type | Description                                                                             |
+|--------------------------------------------|-------------|-----------------------------------------------------------------------------------------|
+| `datadog.dogstatsd.client.metrics`         | count       | Number of `metrics` sent to the DogStatsD client by your application (before sampling). |
+| `datadog.dogstatsd.client.events`          | count       | Number of `events` sent to the DogStatsD client by your application.                    |
+| `datadog.dogstatsd.client.service_checks`  | count       | Number of `service_checks` sent to the DogStatsD client by your application.            |
+| `datadog.dogstatsd.client.bytes_sent`      | count       | Number of bytes successfully sent to the Agent.                                         |
+| `datadog.dogstatsd.client.bytes_dropped`   | count       | Number of bytes dropped by the DogStatsD client.                                        |
+| `datadog.dogstatsd.client.packets_sent`    | count       | Number of datagrams successfully sent to the Agent.                                     |
+| `datadog.dogstatsd.client.packets_dropped` | count       | Number of datagrams dropped by the DogStatsD client.                                    |
+
+To enable or disable telemetry use the `disable_telemetry` argument. Beware,
+using the telemetry with the `DogStatsd` client will increase network usage
+significantly, it is advise to use the `BatchedDogStatsd` when using the
+telemetry.
+
+To enable it on the `DogStatsd` client:
+
+```php
+use DataDog\DogStatsd;
+
+$statsd = new DogStatsd(
+    array('host' => '127.0.0.1',
+          'port' => 8125,
+          'disable_telemetry' => false,
+      )
+  );
+```
+
+To disable telemetry on the `BatchedDogStatsd` client:
+
+```php
+use DataDog\BatchedDogStatsd;
+
+$statsd = new BatchedDogStatsd(
+    array('host' => '127.0.0.1',
+          'port' => 8125,
+          'disable_telemetry' => true,
+      )
+  );
+```
+
+See [DataDog/php-datadogstatsd](https://github.com/DataDog/php-datadogstatsd) for more information about the client configuration.
 
 {{% /tab %}}
 {{% tab ".NET" %}}
