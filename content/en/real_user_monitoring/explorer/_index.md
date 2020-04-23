@@ -40,7 +40,7 @@ Click on any view to open the views panel and see more details (resources, trace
 
 After [being collected][2], your views attributes can be indexed as facets or measures in order to be accessible for your [context](#context) creation and [analytics][3].
 
-Note: to leverage the most out from your RUM Explorer page, make sure your views attributes follow [Datadog attribute naming convention][4].
+Note: to get the most out from your RUM Explorer page, make sure your views attributes follow [Datadog attribute naming convention][4].
 
 {{< tabs >}}
 {{% tab "Facets" %}}
